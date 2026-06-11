@@ -4,7 +4,8 @@ import 'package:redis_jump/model/basic_info_model.dart';
 import 'package:window_manager/window_manager.dart';
 
 class AppTitleBar extends StatelessWidget {
-  const AppTitleBar({super.key});
+  const AppTitleBar({super.key, this.onLinkTap});
+  final VoidCallback? onLinkTap;
 
   @override
   Widget build(BuildContext context) {
@@ -16,32 +17,37 @@ class AppTitleBar extends StatelessWidget {
       color: const Color.fromARGB(255, 60, 60, 60),
       child: Row(
         children: [
+          // 应用图标 + 标题 + 链接按钮（不可拖拽）
+          Padding(
+            padding: const EdgeInsets.only(left: 12),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.apps,
+                  size: 16,
+                  color: Color.fromARGB(255, 250, 250, 250),
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  'RedisJump',
+                  style: TextStyle(
+                    color: Color.fromARGB(255, 239, 239, 239),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(width: 15),
+                _LinkButton(onTap: onLinkTap),
+              ],
+            ),
+          ),
+
           // 拖拽区域
           Expanded(
             child: GestureDetector(
               behavior: HitTestBehavior.translucent,
               onPanStart: (_) => windowManager.startDragging(),
-              child: Container(
-                padding: const EdgeInsets.only(left: 12),
-                child: const Row(
-                  children: [
-                    Icon(
-                      Icons.apps,
-                      size: 16,
-                      color: Color.fromARGB(255, 250, 250, 250),
-                    ),
-                    SizedBox(width: 8),
-                    Text(
-                      'RedisJump',
-                      style: TextStyle(
-                        color: Color.fromARGB(255, 239, 239, 239),
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              child: Container(height: 30),
             ),
           ),
 
@@ -96,7 +102,6 @@ Widget _buildWindowButton({
     ),
   );
 }
-
 Future<void> _toggleMaximize(BuildContext context) async {
   final model = context.read<BasicInfoModel>();
   if (await windowManager.isMaximized()) {
@@ -105,5 +110,31 @@ Future<void> _toggleMaximize(BuildContext context) async {
   } else {
     await windowManager.maximize();
     model.setIsMaxed(true);
+  }
+}
+
+/// 链接按钮（点击弹出 Redis 连接对话框）
+class _LinkButton extends StatelessWidget {
+  const _LinkButton({required this.onTap});
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 30,
+      height: 30,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          hoverColor: const Color.fromARGB(255, 117, 113, 113),
+          child: const Icon(
+            Icons.link,
+            size: 14,
+            color: Color.fromARGB(255, 213, 209, 209),
+          ),
+        ),
+      ),
+    );
   }
 }

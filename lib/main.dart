@@ -52,14 +52,28 @@ class MainPage extends StatefulWidget {
 }
 
 class _MainPageState extends State<MainPage> {
+  final ValueNotifier<bool> _showConnectNotifier = ValueNotifier(false);
+
+  @override
+  void dispose() {
+    _showConnectNotifier.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Column(
         children: [
-          AppTitleBar(),
+          AppTitleBar(
+            onLinkTap: () => _showConnectNotifier.value = true,
+          ),
           // RedisClient内容区域
-          Expanded(child: RedisClientPage()),
+          Expanded(
+            child: RedisClientPage(
+              showConnectNotifier: _showConnectNotifier,
+            ),
+          ),
         ],
       ),
     );

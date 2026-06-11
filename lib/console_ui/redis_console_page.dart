@@ -10,20 +10,28 @@ import 'redis_connect_dialog.dart';
 
 //=============面向外部================
 class RedisClientPage extends StatelessWidget {
-  const RedisClientPage({super.key, this.host, this.port, this.password});
+  const RedisClientPage({
+    super.key,
+    this.host,
+    this.port,
+    this.password,
+    this.showConnectNotifier,
+  });
   final String? host;
   final int? port;
   final String? password;
+  final ValueNotifier<bool>? showConnectNotifier;
 
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
-      create: (context) => _RedisConsoleProvider(),
+      create: (context) => RedisConsoleProvider(),
       child: _RedisConsolePage(
         key: key,
         host: host,
         port: port,
         password: password,
+        showConnectNotifier: showConnectNotifier,
       ),
     );
   }
@@ -31,10 +39,17 @@ class RedisClientPage extends StatelessWidget {
 
 //=================内部包装===================
 class _RedisConsolePage extends StatefulWidget {
-  const _RedisConsolePage({super.key, this.host, this.port, this.password});
+  const _RedisConsolePage({
+    super.key,
+    this.host,
+    this.port,
+    this.password,
+    this.showConnectNotifier,
+  });
   final String? host;
   final int? port;
   final String? password;
+  final ValueNotifier<bool>? showConnectNotifier;
 
   @override
   State<_RedisConsolePage> createState() => _RedisConsolePageState();
@@ -46,13 +61,14 @@ class _RedisConsolePageState extends State<_RedisConsolePage> {
   final _focus = FocusNode();
 
   bool _showToBottom = false;
+  bool _showConnectOverlay = false;
 
   @override
   void initState() {
     super.initState();
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final provider = context.read<_RedisConsoleProvider>();
+      final provider = context.read<RedisConsoleProvider>();
       try {
         await provider.autoConnect(
           host: widget.host ?? "127.0.0.1",
@@ -60,38 +76,43 @@ class _RedisConsolePageState extends State<_RedisConsolePage> {
           password: widget.password ?? "",
         );
       } catch (_) {
-        _showConnectDialog();
+        if (mounted) setState(() => _showConnectOverlay = true);
       }
     });
 
+    widget.showConnectNotifier?.addListener(_onConnectTriggered);
     _scroll.addListener(_onScroll);
+  }
 
-    // 在此处直接拦截 FocusNode 的按键事件
-    _focus.onKeyEvent = (node, event) {
-      // 只处理按下事件 (KeyDown)，忽略抬起事件
-      if (event is! KeyDownEvent) {
-        return KeyEventResult.ignored;
-      }
+  void _onConnectTriggered() {
+    if (widget.showConnectNotifier!.value && !_showConnectOverlay) {
+      setState(() => _showConnectOverlay = true);
+    }
+  }
 
-      final provider = context.read<_RedisConsoleProvider>();
-
-      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-        final h = provider.historyUp();
-        if (h != null) {
-          _updateInput(h);
-        }
-        // 返回 handled 告诉 Flutter：我们已经处理了这个按键，不要让 TextField 再处理了
-        return KeyEventResult.handled;
-      } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-        final h = provider.historyDown();
-        if (h != null) {
-          _updateInput(h);
-        }
-        return KeyEventResult.handled;
-      }
-
+  /// 交由 build 中的 Focus widget 调用，避免直接修改 TextField 的 FocusNode
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) {
       return KeyEventResult.ignored;
-    };
+    }
+
+    final provider = context.read<RedisConsoleProvider>();
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      final h = provider.historyUp();
+      if (h != null) {
+        _updateInput(h);
+      }
+      return KeyEventResult.handled;
+    } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      final h = provider.historyDown();
+      if (h != null) {
+        _updateInput(h);
+      }
+      return KeyEventResult.handled;
+    }
+
+    return KeyEventResult.ignored;
   }
 
   // 提取更新输入框的逻辑
@@ -113,23 +134,11 @@ class _RedisConsolePageState extends State<_RedisConsolePage> {
 
   @override
   void dispose() {
+    widget.showConnectNotifier?.removeListener(_onConnectTriggered);
     _scroll.dispose();
     _input.dispose();
     _focus.dispose();
     super.dispose();
-  }
-
-  Future<void> _showConnectDialog() async {
-    final cfg = await showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const RedisConnectDialog(),
-    );
-
-    if (cfg != null) {
-      if (!mounted) return;
-      await context.read<_RedisConsoleProvider>().connect(cfg);
-    }
   }
 
   void _scrollToBottom() {
@@ -148,52 +157,94 @@ class _RedisConsolePageState extends State<_RedisConsolePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color.fromARGB(255, 30, 31, 34),
-      body: Consumer<_RedisConsoleProvider>(
-        builder: (context, provider, _) {
-          final entries = provider.entries;
-          final itemCount = entries.length + 1;
+      body: Stack(
+        children: [
+          Focus(
+            includeSemantics: false,
+            onKeyEvent: _handleKeyEvent,
+            child: Consumer<RedisConsoleProvider>(
+              builder: (context, provider, _) {
+                final entries = provider.entries;
+                final itemCount = entries.length + 1;
 
-          return ListView.builder(
-            controller: _scroll,
-            padding: const EdgeInsets.all(12),
-            itemCount: itemCount,
-            // 关键优化：保持较长的缓存区域，防止输入框在滚动时因移出视图而销毁
-            cacheExtent: 300,
-            itemBuilder: (context, index) {
-              if (index == itemCount - 1) {
-                return _CommandInput(
-                  key: const ValueKey('terminal_input_field'),
-                  controller: _input,
-                  focusNode: _focus, // 传入外部定义的 FocusNode
-                  enabled: provider.connected,
-                  prompt: provider.config == null
-                      ? "Connecting..."
-                      : provider.client.prompt(provider.config!),
-                  onSubmit: (text) async {
-                    // 1. 先清空输入
-                    _input.clear();
+                return ListView.builder(
+                  controller: _scroll,
+                  padding: const EdgeInsets.all(12),
+                  itemCount: itemCount,
+                  // 关键优化：保持较长的缓存区域，防止输入框在滚动时因移出视图而销毁
+                  cacheExtent: 300,
+                  itemBuilder: (context, index) {
+                    if (index == itemCount - 1) {
+                      return _CommandInput(
+                        key: const ValueKey('terminal_input_field'),
+                        controller: _input,
+                        focusNode: _focus, // 传入外部定义的 FocusNode
+                        enabled: provider.connected,
+                        prompt: provider.config == null
+                            ? "Connecting..."
+                            : provider.client.prompt(provider.config!),
+                        onSubmit: (text) async {
+                          // 1. 先清空输入
+                          _input.clear();
 
-                    // 2. 执行逻辑
-                    if (text.trim().isNotEmpty) {
-                      await provider.execute(text);
+                          // 2. 执行逻辑
+                          if (text.trim().isNotEmpty) {
+                            await provider.execute(text);
+                          }
+
+                          // 3. 核心修复：强制在下一帧重新抓回焦点
+                          // 因为 ListView 更新子项索引会导致焦点瞬时丢失
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (!_focus.hasFocus) {
+                              _focus.requestFocus();
+                            }
+                            _scrollToBottom();
+                          });
+                        },
+                      );
                     }
-
-                    // 3. 核心修复：强制在下一帧重新抓回焦点
-                    // 因为 ListView 更新子项索引会导致焦点瞬时丢失
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (!_focus.hasFocus) {
-                        _focus.requestFocus();
-                      }
-                      _scrollToBottom();
-                    });
+                    return _ConsoleBlock(entry: entries[index]);
                   },
                 );
-              }
-              return _ConsoleBlock(entry: entries[index]);
-            },
-          );
-        },
+              },
+            ),
+          ),
+          // 本地对话框遮罩（不覆盖 app_title_bar）
+          if (_showConnectOverlay)
+            _buildConnectOverlay(context),
+        ],
       ),
+    );
+  }
+
+  Widget _buildConnectOverlay(BuildContext context) {
+    return Stack(
+      children: [
+        // 遮罩层
+        GestureDetector(
+          onTap: () {},
+          child: Container(color: Colors.black54),
+        ),
+        // 居中对话框
+        Center(
+          child: RedisConnectDialog(
+            onConnect: (cfg) async {
+              try {
+                final provider = context.read<RedisConsoleProvider>();
+                await provider.connect(cfg);
+                provider.clearHistory();
+                return true;
+              } catch (_) {
+                return false;
+              }
+            },
+            onCancel: () => setState(() {
+              _showConnectOverlay = false;
+              widget.showConnectNotifier?.value = false;
+            }),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -317,7 +368,7 @@ class ConsoleEntry {
   ConsoleEntry(this.command, this.result);
 }
 
-class _RedisConsoleProvider extends ChangeNotifier {
+class RedisConsoleProvider extends ChangeNotifier {
   final RedisSocketClient client = RedisSocketClient();
   RedisConnectionConfig? config;
 
@@ -349,6 +400,14 @@ class _RedisConsoleProvider extends ChangeNotifier {
       password: password,
     ); //port 6379
     await connect(cfg);
+  }
+
+  /// 清空命令历史和输出记录
+  void clearHistory() {
+    _entries.clear();
+    _history.clear();
+    _historyCursor = 0;
+    notifyListeners();
   }
 
   ///向redis客户端发送信息
